@@ -42,6 +42,13 @@ namespace StartupMostRecentGame
 
         private static Dictionary<string, object> ParseJSON(string json, int startPos)
         {
+            if (json[startPos] != '{')
+            {
+                throw new ArgumentException("startPoint should point to an occurance of '{'");
+            }
+
+            Console.WriteLine(startPos);
+
             Dictionary<string, object> returnDict = new Dictionary<string, object>();
             int layer = 0;
             string currentKey = string.Empty, tempValue;
@@ -62,7 +69,7 @@ namespace StartupMostRecentGame
                 }
 
                 // exits loop when outside the target curly brackets
-                if (layer == 0)
+                if (layer < 1)
                 {
                     break;
                 }
@@ -72,6 +79,8 @@ namespace StartupMostRecentGame
                 {
                     continue;
                 }
+
+                //Console.WriteLine(i);
 
                 switch (json[i])
                 {
@@ -102,26 +111,28 @@ namespace StartupMostRecentGame
                         else if (json[i + 1] == '"')
                         {
                             tempValue = readString(json, i + 1);
+                            Console.WriteLine(tempValue);
 
                             if (!returnDict.TryAdd(currentKey, tempValue))
                             {
                                 throw new ArgumentException("Duplicate keys in JSON");
                             }
 
-                            i += tempValue.Length + 1;
+                            i += tempValue.Length + 2;
                         }
                         else
                         {
                             // assuming int for ease
 
                             tempValueInt = readInt(json, i + 1);
+                            Console.WriteLine(tempValueInt);
 
                             if (!returnDict.TryAdd(currentKey, tempValueInt))
                             {
                                 throw new ArgumentException("Duplicate keys in JSON");
                             }
 
-                            i += tempValueInt.ToString().Length + 1;
+                            i += tempValueInt.ToString().Length;
                         }
 
                         currentKey = string.Empty;
@@ -164,8 +175,10 @@ namespace StartupMostRecentGame
             return long.Parse(json.Substring(startPoint, currentPoint - startPoint));
         }
 
-        private static List<Dictionary<string, object>> ParseJSONList(string json, int startPoint)
+        private static List<Dictionary<string, object>> ParseJSONList(string json, int startPoint) // todo make work with int lists
         {
+            Console.WriteLine("List start");
+
             if (json[startPoint] != '[')
             {
                 throw new ArgumentException("startPoint should point to an occurance of '['");
@@ -222,10 +235,10 @@ namespace StartupMostRecentGame
 
             Console.WriteLine("Key: " + key);
 
-            Console.WriteLine("Attempting to get recently played games");
+            Console.WriteLine("Attempting to get library data");
 
-            string recentGames = SteamJSON.APIRequestBuilder(key, "IPlayerService", "GetRecentlyPlayedGames",
-                "v0001", new string[] { "steamid=76561198136424150" });
+            string recentGames = SteamJSON.APIRequestBuilder(key, "IPlayerService", "GetOwnedGames",
+                "v0001", new string[] { "steamid=76561198136424150", "include_appinfo=true" });
             string site;
 
             try
