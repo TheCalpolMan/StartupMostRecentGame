@@ -47,8 +47,6 @@ namespace StartupMostRecentGame
                 throw new ArgumentException("startPoint should point to an occurance of '{'");
             }
 
-            Console.WriteLine(startPos);
-
             Dictionary<string, object> returnDict = new Dictionary<string, object>();
             int layer = 0;
             string currentKey = string.Empty, tempValue;
@@ -111,7 +109,7 @@ namespace StartupMostRecentGame
                         else if (json[i + 1] == '"')
                         {
                             tempValue = readString(json, i + 1);
-                            Console.WriteLine(tempValue);
+                            // Console.WriteLine(tempValue);
 
                             if (!returnDict.TryAdd(currentKey, tempValue))
                             {
@@ -120,12 +118,20 @@ namespace StartupMostRecentGame
 
                             i += tempValue.Length + 2;
                         }
+                        else if (json[i + 1] == 't' || json[i + 1] == 'f')
+                        {
+                            if (!returnDict.TryAdd(currentKey, json[i + 1] == 't'))
+                            {
+                                throw new ArgumentException("Duplicate keys in JSON");
+                            }
+
+                            i += 4;
+                        }
                         else
                         {
                             // assuming int for ease
 
                             tempValueInt = readInt(json, i + 1);
-                            Console.WriteLine(tempValueInt);
 
                             if (!returnDict.TryAdd(currentKey, tempValueInt))
                             {
@@ -175,23 +181,30 @@ namespace StartupMostRecentGame
             return long.Parse(json.Substring(startPoint, currentPoint - startPoint));
         }
 
-        private static List<Dictionary<string, object>> ParseJSONList(string json, int startPoint) // todo make work with int lists
+        private static List<object> ParseJSONList(string json, int startPoint) // todo make work with int lists
         {
-            Console.WriteLine("List start");
-
             if (json[startPoint] != '[')
             {
                 throw new ArgumentException("startPoint should point to an occurance of '['");
             }
 
-            List<Dictionary<string, object>> returnList = new List<Dictionary<string, object>>();
+            List<object> returnList = new List<object>();
             int currentPos = startPoint + 1,
                 endPos = matchingBrace(json, startPoint, '[', ']') - 1;
 
             while (currentPos < endPos)
             {
-                returnList.Add(ParseJSON(json, currentPos));
-                currentPos = matchingBrace(json, currentPos, '{', '}') + 2;
+                if (json[currentPos] == '{')
+                {
+                    returnList.Add(ParseJSON(json, currentPos));
+                    currentPos = matchingBrace(json, currentPos, '{', '}') + 2;
+                }
+                else
+                {
+                    // assuming int for ease (again)
+                    returnList.Add(readInt(json, currentPos));
+                    currentPos += returnList[returnList.Count - 1].ToString().Length + 1;
+                }
             }
 
             return returnList;
