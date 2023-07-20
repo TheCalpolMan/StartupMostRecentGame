@@ -1,6 +1,11 @@
-﻿using System.Diagnostics;
-using System.Drawing;
+﻿using HtmlAgilityPack;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Threading.Tasks;
+using System.Net;
+using System.Text;
 using System.IO;
+using static System.Net.WebRequestMethods;
 
 namespace StartupMostRecentGame
 {
@@ -16,11 +21,6 @@ namespace StartupMostRecentGame
             }
 
             return "https://api.steampowered.com/" + service + "/" + method + "/" + version + "/?key=" + key + argsString + "&format=json";
-        }
-
-        public static T SearchJSON<T>(Dictionary<string, object> ParsedJSON, string key)
-        {
-            return SearchJSON<T>(ParsedJSON, new string[] { key });
         }
 
         public static T SearchJSON<T>(Dictionary<string, object> ParsedJSON, string[] keys)
@@ -252,88 +252,20 @@ namespace StartupMostRecentGame
 
             string recentGames = SteamJSON.APIRequestBuilder(key, "IPlayerService", "GetOwnedGames",
                 "v0001", new string[] { "steamid=76561198136424150", "include_appinfo=true" });
-            string stringSite;
-            Stream streamSite;
+            string site;
 
             try
             {
-                stringSite = getSiteString(recentGames, 10);
+                site = getSite(recentGames, 10);
             } catch (TimeoutException ex)
             {
                 Console.WriteLine(ex.Message);
                 return;
             }
 
-            Console.WriteLine("Success, now parsing");
+            Console.WriteLine("Success, now parsing and finding most recently played game");
 
-            Dictionary<string, object> json = SteamJSON.ParseJSON(stringSite);
-
-            Console.WriteLine("Parse complete, seaching through "
-                          + SteamJSON.SearchJSON<long>(json, new string[] { "response", "game_count" }).ToString()
-                          + " games to find most recently played game");
-
-            List<object> gamedata = SteamJSON.SearchJSON<List<object>>(json, new string[] { "response", "games" });
-
-            Dictionary<string, object> highest = new Dictionary<string, object>();
-            long highestValue = -1, currentValue;
-            string[] searchKeys = new string[] { "rtime_last_played" };
-
-            foreach (object game in gamedata)
-            {
-                currentValue = SteamJSON.SearchJSON<long>((Dictionary<string, object>)game, searchKeys);
-
-                if (highestValue < currentValue)
-                {
-                    highest = (Dictionary<string, object>)game;
-                    highestValue = currentValue;
-                }
-            }
-
-            Console.WriteLine("Last played game: " + SteamJSON.SearchJSON<string>(highest, "name"));
-            Console.WriteLine("Attempting to get game icon");
-
-            ProcessStartInfo processInfo;
-            Process process;
-
-            string appid = SteamJSON.SearchJSON<long>(highest, "appid").ToString();
-            processInfo = new ProcessStartInfo("cmd", "/C steamcmd +app_info_update " + appid + " +app_info_print " + appid + " +quit 1> _output.txt 2>&1");
-            processInfo.CreateNoWindow = false;
-            processInfo.UseShellExecute = false;
-            processInfo.RedirectStandardInput = true;
-            processInfo.RedirectStandardOutput = false;
-            processInfo.WorkingDirectory = "C:\\shit\\SteamCMD";
-
-            process = Process.Start(processInfo);
-
-            Console.WriteLine("uhh?");
-
-
-            /*try
-            {
-                streamSite = getSiteStream("http://media.steampowered.com/steamcommunity/public/images/apps/"
-                               + SteamJSON.SearchJSON<long>(highest, "appid").ToString()
-                               + "/"
-                               + SteamJSON.SearchJSON<string>(highest, "img_icon_url")
-                               + ".jpg", 10);
-            }
-            catch (TimeoutException ex)
-            {
-                Console.WriteLine(ex.Message);
-                return;
-            }
-
-            Image image = Image.FromStream(streamSite);
-            Icon icon = Icon.FromHandle(((Bitmap)image).GetHicon());
-            using (FileStream fs = new FileStream("C:\\users\\jacob\\Downloads\\iconico", FileMode.Create))
-                icon.Save(fs);
-
-            // using code from https://www.codeproject.com/Articles/3905/Creating-Shell-Links-Shortcuts-in-NET-Programs-Usi
-
-            WshShell shell = new WshShell();
-            IWshShortcut link = (IWshShortcut)shell.CreateShortcut(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) + "\\hello.lnk");
-            link.TargetPath = "https://google.com";
-            link.IconLocation = "C:\\users\\jacob\\Downloads\\icon.ico";
-            link.Save();*/
+            Dictionary<string, object> json = SteamJSON.ParseJSON(site);
         }
 
         private static string getKey()
@@ -344,21 +276,14 @@ namespace StartupMostRecentGame
             }
         }
 
-        private static async Task<string> CallUrlString(string fullUrl)
+        private static async Task<string> CallUrl(string fullUrl)
         {
             HttpClient client = new HttpClient();
-            string response = await client.GetStringAsync(fullUrl);
+            var response = await client.GetStringAsync(fullUrl);
             return response;
         }
 
-        private static async Task<Stream> CallUrlStream(string fullUrl)
-        {
-            HttpClient client = new HttpClient();
-            Stream response = await client.GetStreamAsync(fullUrl);
-            return response;
-        }
-
-        private static string getSiteString(string url, int timeout)
+        private static string getSite(string url, int timeout)
         {
             DateTime maxTime = DateTime.Now.Add(TimeSpan.FromSeconds(timeout));
             Task<String> result;
@@ -367,30 +292,9 @@ namespace StartupMostRecentGame
             {
                 try
                 {
-                    result = CallUrlString(url);
+                    result = CallUrl(url);
                     return result.Result;
                 }catch (AggregateException)
-                {
-
-                }
-            }
-
-            throw new TimeoutException("Took too long to connect to internet :(");
-        }
-
-        private static Stream getSiteStream(string url, int timeout)
-        {
-            DateTime maxTime = DateTime.Now.Add(TimeSpan.FromSeconds(timeout));
-            Task<Stream> result;
-
-            while (DateTime.Now < maxTime)
-            {
-                try
-                {
-                    result = CallUrlStream(url);
-                    return result.Result;
-                }
-                catch (AggregateException)
                 {
 
                 }
