@@ -1,6 +1,5 @@
-﻿using System.Diagnostics;
+﻿using IWshRuntimeLibrary;
 using System.Drawing;
-using System.IO;
 
 namespace StartupMostRecentGame
 {
@@ -33,6 +32,23 @@ namespace StartupMostRecentGame
             }
 
             return (T)currentResult;
+        }
+
+        public static bool SearchJSONUnsure<T>(Dictionary<string, object> ParsedJSON, string[] keys, out T value)
+        {
+            object currentResult = ParsedJSON;
+
+            for (int i = 0; i < keys.Length; i++)
+            {
+                if (!((Dictionary<string, object>)currentResult).TryGetValue(keys[i], out currentResult))
+                {
+                    value = default(T);
+                    return false;
+                }
+            }
+
+            value = (T)currentResult;
+            return true;
         }
 
         public static Dictionary<string, object> ParseJSON(string json)
@@ -244,6 +260,14 @@ namespace StartupMostRecentGame
     {
         static void Main(string[] args)
         {
+            Dictionary<string, object> localData = getData();
+
+            Console.WriteLine("Deleting old shortcut");
+            if (System.IO.File.Exists(SteamJSON.SearchJSON<string>(localData, "lastGame")))
+                System.IO.File.Delete(SteamJSON.SearchJSON<string>(localData, "lastGame"));
+            else
+                Console.WriteLine("Old shortcut didn't exist");
+
             string key = getKey();
 
             Console.WriteLine("Key: " + key);
@@ -251,14 +275,15 @@ namespace StartupMostRecentGame
             Console.WriteLine("Attempting to get library data");
 
             string recentGames = SteamJSON.APIRequestBuilder(key, "IPlayerService", "GetOwnedGames",
-                "v0001", new string[] { "steamid=76561198136424150", "include_appinfo=true" });
+                "v0001", new string[] { "steamid=" + SteamJSON.SearchJSON<string>(localData, "steamid"), "include_appinfo=true" });
             string stringSite;
             Stream streamSite;
 
             try
             {
                 stringSite = getSiteString(recentGames, 10);
-            } catch (TimeoutException ex)
+            }
+            catch (TimeoutException ex)
             {
                 Console.WriteLine(ex.Message);
                 return;
@@ -289,10 +314,13 @@ namespace StartupMostRecentGame
                 }
             }
 
+            long appid = SteamJSON.SearchJSON<long>(highest, "appid");
             Console.WriteLine("Last played game: " + SteamJSON.SearchJSON<string>(highest, "name"));
             Console.WriteLine("Attempting to get game icon");
 
-            ProcessStartInfo processInfo;
+            // this was an attempt to get SteamCMD to hand over an app's icon hash. Couldn't get it to work, may revisit
+
+            /*ProcessStartInfo processInfo;
             Process process;
 
             string appid = SteamJSON.SearchJSON<long>(highest, "appid").ToString();
@@ -305,16 +333,25 @@ namespace StartupMostRecentGame
 
             process = Process.Start(processInfo);
 
-            Console.WriteLine("uhh?");
+            Console.WriteLine("uhh?");*/
 
-
-            /*try
+            string? iconPath = "";
+            if (SteamJSON.SearchJSONUnsure<string>(localData, new string[] { "clientIcons", appid.ToString() }, out iconPath))
             {
-                streamSite = getSiteStream("http://media.steampowered.com/steamcommunity/public/images/apps/"
-                               + SteamJSON.SearchJSON<long>(highest, "appid").ToString()
-                               + "/"
-                               + SteamJSON.SearchJSON<string>(highest, "img_icon_url")
-                               + ".jpg", 10);
+                Console.WriteLine("Icon url found");
+            }
+            else
+            {
+                Console.WriteLine("Icon path not found, please find icon url on steamDB then enter below");
+                Console.WriteLine("https://steamdb.info/app/" + appid +"/info/");
+                iconPath = Console.ReadLine();
+                addAppIconToData(appid.ToString(), iconPath);
+                Console.WriteLine("Url added to local data");
+            }
+
+            try
+            {
+                streamSite = getSiteStream(iconPath, 10);
             }
             catch (TimeoutException ex)
             {
@@ -322,23 +359,154 @@ namespace StartupMostRecentGame
                 return;
             }
 
-            Image image = Image.FromStream(streamSite);
-            Icon icon = Icon.FromHandle(((Bitmap)image).GetHicon());
-            using (FileStream fs = new FileStream("C:\\users\\jacob\\Downloads\\iconico", FileMode.Create))
+            Console.WriteLine("Getting icon from url");
+
+            Icon icon;
+
+            // from https://stackoverflow.com/questions/35826848/c-sharp-get-icon-from-url-as-system-drawing-icon
+            // the stream needs to be converted to a memorystream (which supports seeking) so that the icon constructor doesn't need to be passed dimensions
+
+            using (var ms = new MemoryStream())
+            {
+                streamSite.CopyTo(ms);
+                ms.Seek(0, SeekOrigin.Begin); // See https://stackoverflow.com/a/72205381/640195
+
+                icon = new Icon(ms);
+            }
+
+            string iconLocation = System.IO.Directory.GetCurrentDirectory() + "\\" + appid.ToString() + ".ico";
+            using (FileStream fs = new FileStream(iconLocation, FileMode.Create))
                 icon.Save(fs);
+
+            Console.WriteLine("Icon saved locally, creating shortcut on desktop");
 
             // using code from https://www.codeproject.com/Articles/3905/Creating-Shell-Links-Shortcuts-in-NET-Programs-Usi
 
             WshShell shell = new WshShell();
-            IWshShortcut link = (IWshShortcut)shell.CreateShortcut(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) + "\\hello.lnk");
-            link.TargetPath = "https://google.com";
-            link.IconLocation = "C:\\users\\jacob\\Downloads\\icon.ico";
-            link.Save();*/
+            string linkLocation = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) + "\\" + SteamJSON.SearchJSON<string>(highest, "name") + ".lnk";
+            IWshShortcut link = (IWshShortcut)shell.CreateShortcut(linkLocation);
+            link.TargetPath = "steam://rungameid/" + appid.ToString();
+            link.IconLocation = iconLocation;
+            link.Save();
+
+            Console.WriteLine("Shortcut created! Cleaning up");
+
+            changeLastGame(linkLocation);
+            Thread.Sleep(1000);
+            System.IO.File.Delete(iconLocation);
+        }
+
+        private static void addAppIconToData(string appid, string iconPath)
+        {
+            string data, oldLastGame, newData;
+            int clientIconsStartPoint;
+
+            using (StreamReader sr = System.IO.File.OpenText("data.txt"))
+            {
+                data = sr.ReadLine();
+            }
+
+            clientIconsStartPoint = findString(data, "clientIcons\":{", true);
+            newData = data.Substring(0, clientIconsStartPoint);
+            newData += "\"" + appid + "\":" + "\""+ iconPath + "\"," + data.Substring(clientIconsStartPoint);
+
+            using (StreamWriter sw = new StreamWriter("data.txt"))
+            {
+                sw.Write(newData);
+            }
+        }
+
+        private static void changeLastGame(string newLastGame)
+        {
+            string data, oldLastGame, newData;
+            int restOfDataStartPoint, iconPathStartPoint;
+
+            using (StreamReader sr = System.IO.File.OpenText("data.txt"))
+            {
+                data = sr.ReadLine();
+            }
+
+            iconPathStartPoint = findString(data, "\"lastGame\":", true);
+
+            newData = data.Substring(0, iconPathStartPoint + 1);
+            oldLastGame = readString(data, iconPathStartPoint);
+            restOfDataStartPoint = iconPathStartPoint + 1 + oldLastGame.Length;
+
+            newData += newLastGame + data.Substring(restOfDataStartPoint);
+
+            using (StreamWriter sw = new StreamWriter("data.txt"))
+            {
+                sw.Write(newData);
+            }
+        }
+
+        /// <summary>
+        ///  Finds a string within another string
+        /// </summary>
+        /// <param name="toReadFrom">String to read from</param>
+        /// <param name="target">Target string</param>
+        /// <param name="returnEndPos">Decides whether to return the first character of the target string (false), or the last (true)</param>
+        /// <returns>-1 if the target string doesn't exist within the base string, otherwise the position
+        /// in the base string of either the start or the end of the target string, depending on returnEndPos</returns>
+        private static int findString(string toReadFrom, string target, bool returnEndPos)
+        {
+            bool flag = true;
+
+            for (int i = 0; i < toReadFrom.Length; i++)
+            {
+                if (toReadFrom[i] == target[0])
+                {
+                    flag = true;
+
+                    for (int x = 1; x < target.Length; x++)
+                    {
+                        if (toReadFrom[i + x] != target[x])
+                        {
+                            flag = false;
+                            break;
+                        }
+                    }
+
+                    if (flag)
+                    {
+                        return returnEndPos ? i + target.Length : i;
+                    }
+                }
+            }
+
+            return -1;
+        }
+
+        private static string readString(string toReadFrom, int startPoint)
+        {
+            if (toReadFrom[startPoint] != '"')
+            {
+                throw new ArgumentException("startPoint should point to an occurance of '\"'");
+            }
+
+            for (int i = startPoint + 1; i < toReadFrom.Length; i++)
+            {
+                if (toReadFrom[i] == '"')
+                {
+                    return toReadFrom.Substring(startPoint + 1, i - startPoint - 1);
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static Dictionary<string, object> getData()
+        {
+            using (StreamReader sr = System.IO.File.OpenText("data.txt"))
+            {
+                Dictionary<string, object> data = SteamJSON.ParseJSON(sr.ReadLine());
+                return data;
+            }
         }
 
         private static string getKey()
         {
-            using (StreamReader sr = System.IO.File.OpenText("C:\\shit\\steam_api_key.txt"))
+            using (StreamReader sr = System.IO.File.OpenText("key.txt"))
             {
                 return sr.ReadLine();
             }
@@ -369,7 +537,8 @@ namespace StartupMostRecentGame
                 {
                     result = CallUrlString(url);
                     return result.Result;
-                }catch (AggregateException)
+                }
+                catch (AggregateException)
                 {
 
                 }
