@@ -261,12 +261,26 @@ namespace StartupMostRecentGame
         static void Main(string[] args)
         {
             Dictionary<string, object> localData = getData();
+            string iconFolderLocation = System.IO.Directory.GetCurrentDirectory() + "\\icon";
 
-            Console.WriteLine("Deleting old shortcut");
+            /*Console.WriteLine("Deleting old shortcut");
             if (System.IO.File.Exists(SteamJSON.SearchJSON<string>(localData, "lastGame")))
                 System.IO.File.Delete(SteamJSON.SearchJSON<string>(localData, "lastGame"));
             else
-                Console.WriteLine("Old shortcut didn't exist");
+                Console.WriteLine("Old shortcut didn't exist");*/
+
+            Console.WriteLine("Deleting old icon");
+            if (Directory.Exists(iconFolderLocation))
+            {
+                foreach (string file in Directory.GetFiles(iconFolderLocation))
+                {
+                    System.IO.File.Delete(file);
+                }
+            }
+            else
+            {
+                Console.WriteLine("Old icon didn't exist");
+            }
 
             string key = getKey();
 
@@ -369,31 +383,60 @@ namespace StartupMostRecentGame
             using (var ms = new MemoryStream())
             {
                 streamSite.CopyTo(ms);
-                ms.Seek(0, SeekOrigin.Begin); // See https://stackoverflow.com/a/72205381/640195
+                ms.Seek(0, SeekOrigin.Begin); // See https://stackoverflow.com/a/72205381/640195 (from the original stackoverflow q)
 
                 icon = new Icon(ms);
             }
 
-            string iconLocation = System.IO.Directory.GetCurrentDirectory() + "\\" + appid.ToString() + ".ico";
+            Directory.CreateDirectory(iconFolderLocation);
+
+            string iconLocation = iconFolderLocation + "\\" + appid.ToString() + ".ico";
             using (FileStream fs = new FileStream(iconLocation, FileMode.Create))
                 icon.Save(fs);
 
-            Console.WriteLine("Icon saved locally, creating shortcut on desktop");
+            Console.WriteLine("Icon saved locally");
 
-            // using code from https://www.codeproject.com/Articles/3905/Creating-Shell-Links-Shortcuts-in-NET-Programs-Usi
+            string oldLinkLocation = SteamJSON.SearchJSON<string>(localData, "lastGame");
+            string newLinkLocation = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) + "\\" + SteamJSON.SearchJSON<string>(highest, "name") + ".lnk";
 
-            WshShell shell = new WshShell();
-            string linkLocation = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) + "\\" + SteamJSON.SearchJSON<string>(highest, "name") + ".lnk";
-            IWshShortcut link = (IWshShortcut)shell.CreateShortcut(linkLocation);
-            link.TargetPath = "steam://rungameid/" + appid.ToString();
-            link.IconLocation = iconLocation;
-            link.Save();
+            if (System.IO.File.Exists(oldLinkLocation))
+            {
+                Console.WriteLine("Editing shortcut");
 
-            Console.WriteLine("Shortcut created! Cleaning up");
+                if(oldLinkLocation != newLinkLocation)
+                {
+                    // changing the name
+                    System.IO.File.Move(oldLinkLocation, newLinkLocation);
+                    Thread.Sleep(1000);
 
-            changeLastGame(linkLocation);
+                    // changing the icon and target address
+
+                    WshShell shell = new WshShell();
+                    IWshShortcut link = (IWshShortcut)shell.CreateShortcut(newLinkLocation);
+                    link.TargetPath = "steam://rungameid/" + appid.ToString();
+                    link.IconLocation = iconLocation;
+                    link.Save();
+                }
+
+                Console.WriteLine("Shortcut edited! Cleaning up");
+            }
+            else
+            {
+                Console.WriteLine("No existing shortcut, creating shortcut");
+
+                // using code from https://www.codeproject.com/Articles/3905/Creating-Shell-Links-Shortcuts-in-NET-Programs-Usi
+
+                WshShell shell = new WshShell();
+                IWshShortcut link = (IWshShortcut)shell.CreateShortcut(newLinkLocation);
+                link.TargetPath = "steam://rungameid/" + appid.ToString();
+                link.IconLocation = iconLocation;
+                link.Save();
+
+                Console.WriteLine("Shortcut created! Cleaning up");
+            }
+
+            changeLastGame(newLinkLocation);
             Thread.Sleep(1000);
-            System.IO.File.Delete(iconLocation);
         }
 
         private static void addAppIconToData(string appid, string iconPath)
