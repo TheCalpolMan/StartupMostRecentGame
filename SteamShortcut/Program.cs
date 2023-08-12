@@ -1,7 +1,7 @@
 ﻿using IWshRuntimeLibrary;
 using System.Drawing;
 
-namespace StartupMostRecentGame
+namespace SteamShortcut
 {
     public class SteamJSON
     {
