@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.33516.290
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StartupMostRecentGame", "StartupMostRecentGame\StartupMostRecentGame.csproj", "{BF0FCDB4-0CC1-4FF0-B044-0B9030B77F5E}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SteamShortcut", "SteamShortcut\SteamShortcut.csproj", "{BF0FCDB4-0CC1-4FF0-B044-0B9030B77F5E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

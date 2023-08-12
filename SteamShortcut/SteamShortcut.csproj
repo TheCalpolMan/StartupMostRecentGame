@@ -9,11 +9,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Remove="Config.exe" />
     <None Remove="data.txt" />
     <None Remove="key.txt" />
   </ItemGroup>
 
   <ItemGroup>
+    <AdditionalFiles Include="Config.exe">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </AdditionalFiles>
     <AdditionalFiles Include="data.txt">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </AdditionalFiles>
