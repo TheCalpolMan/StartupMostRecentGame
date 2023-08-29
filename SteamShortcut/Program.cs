@@ -1,5 +1,6 @@
 ﻿using IWshRuntimeLibrary;
 using System.Drawing;
+using System.IO;
 
 namespace SteamShortcut
 {
@@ -258,7 +259,29 @@ namespace SteamShortcut
 
     internal class Program
     {
+        private static char[] badFilenameChars = new char[] { '<', '>', ':', '"', '/', '\\', '|', '?', '*' };
+
         static void Main(string[] args)
+        {
+            try
+            {
+                steamShortcut();
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+                Console.WriteLine(e.StackTrace);
+                Console.WriteLine("Press enter to exit (this should be saved to \"errorLog.txt\"...");
+                Console.ReadLine();
+
+                using (StreamWriter sw = System.IO.File.CreateText("errorLog.txt"))
+                {
+                    sw.WriteLine(e.Message + "\n\n------------------\n\n" + e.StackTrace);
+                }
+            }
+        }
+
+        static void steamShortcut()
         {
             Dictionary<string, object> localData = getData();
             string iconFolderLocation = System.IO.Directory.GetCurrentDirectory() + "\\icon";
@@ -397,7 +420,8 @@ namespace SteamShortcut
             Console.WriteLine("Icon saved locally");
 
             string oldLinkLocation = SteamJSON.SearchJSON<string>(localData, "lastGame");
-            string newLinkLocation = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) + "\\" + SteamJSON.SearchJSON<string>(highest, "name") + ".lnk";
+            string newLinkLocation = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) + "\\" + 
+                removeChars(SteamJSON.SearchJSON<string>(highest, "name"), badFilenameChars) + ".lnk";
 
             if (System.IO.File.Exists(oldLinkLocation))
             {
@@ -437,6 +461,32 @@ namespace SteamShortcut
 
             changeLastGame(newLinkLocation);
             Thread.Sleep(1000);
+        }
+
+        private static string removeChars(string baseString, char[] chars)
+        {
+            for (int i = 0; i < baseString.Length; i++)
+            {
+                while (isIn<char>(baseString[i], chars))
+                {
+                    baseString = baseString.Remove(i, 1);
+                }
+            }
+
+            return baseString;
+        }
+
+        private static bool isIn<T>(T potentialElement, T[] array)
+        {
+            foreach (T element in array)
+            {
+                if(potentialElement.Equals(element))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static void addAppIconToData(string appid, string iconPath)
