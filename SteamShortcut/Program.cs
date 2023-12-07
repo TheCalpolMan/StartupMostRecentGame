@@ -1,260 +1,18 @@
 ﻿using IWshRuntimeLibrary;
 using System.Drawing;
 using System.IO;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace SteamShortcut
 {
-    public class SteamJSON
+    public struct data
     {
-        public static string APIRequestBuilder(string key, string service, string method, string version, string[] args)
-        {
-            string argsString = "";
+        public string
+            steamid,
+            lastGame;
 
-            foreach (string arg in args)
-            {
-                argsString += "&" + arg;
-            }
-
-            return "https://api.steampowered.com/" + service + "/" + method + "/" + version + "/?key=" + key + argsString + "&format=json";
-        }
-
-        public static T SearchJSON<T>(Dictionary<string, object> ParsedJSON, string key)
-        {
-            return SearchJSON<T>(ParsedJSON, new string[] { key });
-        }
-
-        public static T SearchJSON<T>(Dictionary<string, object> ParsedJSON, string[] keys)
-        {
-            object currentResult = ParsedJSON;
-
-            for (int i = 0; i < keys.Length; i++)
-            {
-                ((Dictionary<string, object>)currentResult).TryGetValue(keys[i], out currentResult);
-            }
-
-            return (T)currentResult;
-        }
-
-        public static bool SearchJSONUnsure<T>(Dictionary<string, object> ParsedJSON, string[] keys, out T value)
-        {
-            object currentResult = ParsedJSON;
-
-            for (int i = 0; i < keys.Length; i++)
-            {
-                if (!((Dictionary<string, object>)currentResult).TryGetValue(keys[i], out currentResult))
-                {
-                    value = default(T);
-                    return false;
-                }
-            }
-
-            value = (T)currentResult;
-            return true;
-        }
-
-        public static Dictionary<string, object> ParseJSON(string json)
-        {
-            return ParseJSON(json, 0);
-        }
-
-        private static Dictionary<string, object> ParseJSON(string json, int startPos)
-        {
-            if (json[startPos] != '{')
-            {
-                throw new ArgumentException("startPoint should point to an occurance of '{'");
-            }
-
-            Dictionary<string, object> returnDict = new Dictionary<string, object>();
-            int layer = 0;
-            string currentKey = string.Empty, tempValue;
-            long tempValueInt;
-
-            for (int i = startPos; i < json.Length; i++)
-            {
-                switch (json[i])
-                {
-                    case '{':
-                        layer++;
-                        break;
-                    case '}':
-                        layer--;
-                        break;
-                    default:
-                        break;
-                }
-
-                // exits loop when outside the target curly brackets
-                if (layer < 1)
-                {
-                    break;
-                }
-
-                // continues looping until on the correct layer again
-                if (layer != 1)
-                {
-                    continue;
-                }
-
-                //Console.WriteLine(i);
-
-                switch (json[i])
-                {
-                    case '"':
-                        currentKey = readString(json, i);
-                        i += currentKey.Length + 1;
-
-                        break;
-                    case ':':
-                        if (json[i + 1] == '{')
-                        {
-                            if (!returnDict.TryAdd(currentKey, ParseJSON(json, i + 1)))
-                            {
-                                throw new ArgumentException("Duplicate keys in JSON");
-                            }
-
-                            i = matchingBrace(json, i + 1, '{', '}');
-                        }
-                        else if (json[i + 1] == '[')
-                        {
-                            if (!returnDict.TryAdd(currentKey, ParseJSONList(json, i + 1)))
-                            {
-                                throw new ArgumentException("Duplicate keys in JSON");
-                            }
-
-                            i = matchingBrace(json, i + 1, '[', ']');
-                        }
-                        else if (json[i + 1] == '"')
-                        {
-                            tempValue = readString(json, i + 1);
-                            // Console.WriteLine(tempValue);
-
-                            if (!returnDict.TryAdd(currentKey, tempValue))
-                            {
-                                throw new ArgumentException("Duplicate keys in JSON");
-                            }
-
-                            i += tempValue.Length + 2;
-                        }
-                        else if (json[i + 1] == 't' || json[i + 1] == 'f')
-                        {
-                            if (!returnDict.TryAdd(currentKey, json[i + 1] == 't'))
-                            {
-                                throw new ArgumentException("Duplicate keys in JSON");
-                            }
-
-                            i += 4;
-                        }
-                        else
-                        {
-                            // assuming int for ease
-
-                            tempValueInt = readInt(json, i + 1);
-
-                            if (!returnDict.TryAdd(currentKey, tempValueInt))
-                            {
-                                throw new ArgumentException("Duplicate keys in JSON");
-                            }
-
-                            i += tempValueInt.ToString().Length;
-                        }
-
-                        currentKey = string.Empty;
-                        break;
-                    default:
-                        break;
-                }
-            }
-
-            return returnDict;
-        }
-
-        private static string readString(string json, int startPoint)
-        {
-            if (json[startPoint] != '"')
-            {
-                throw new ArgumentException("startPoint should point to an occurance of '\"'");
-            }
-
-            for (int i = startPoint + 1; i < json.Length; i++)
-            {
-                if (json[i] == '"')
-                {
-                    return json.Substring(startPoint + 1, i - startPoint - 1);
-                }
-            }
-
-            return string.Empty;
-        }
-
-        private static long readInt(string json, int startPoint)
-        {
-            int currentPoint = startPoint;
-
-            while ('0' <= json[currentPoint] && json[currentPoint] <= '9')
-            {
-                currentPoint++;
-            }
-
-            return long.Parse(json.Substring(startPoint, currentPoint - startPoint));
-        }
-
-        private static List<object> ParseJSONList(string json, int startPoint) // todo make work with int lists
-        {
-            if (json[startPoint] != '[')
-            {
-                throw new ArgumentException("startPoint should point to an occurance of '['");
-            }
-
-            List<object> returnList = new List<object>();
-            int currentPos = startPoint + 1,
-                endPos = matchingBrace(json, startPoint, '[', ']') - 1;
-
-            while (currentPos < endPos)
-            {
-                if (json[currentPos] == '{')
-                {
-                    returnList.Add(ParseJSON(json, currentPos));
-                    currentPos = matchingBrace(json, currentPos, '{', '}') + 2;
-                }
-                else
-                {
-                    // assuming int for ease (again)
-                    returnList.Add(readInt(json, currentPos));
-                    currentPos += returnList[returnList.Count - 1].ToString().Length + 1;
-                }
-            }
-
-            return returnList;
-        }
-
-        private static int matchingBrace(string text, int startPoint, char upLevel, char downLevel)
-        {
-            if (text[startPoint] != upLevel)
-            {
-                throw new ArgumentException("startPoint should point to an occurance of upLevel");
-            }
-
-            int level = 0;
-
-            for (int i = startPoint; i < text.Length; i++)
-            {
-                if (text[i] == upLevel)
-                {
-                    level++;
-                }
-                else if (text[i] == downLevel)
-                {
-                    level--;
-                }
-
-                if (level == 0)
-                {
-                    return i;
-                }
-            }
-
-            return -1;
-        }
+        public Dictionary<string, string> clientIcons;
     }
 
     internal class Program
@@ -283,7 +41,7 @@ namespace SteamShortcut
 
         static void steamShortcut()
         {
-            Dictionary<string, object> localData = getData();
+            data localData = getData();
             string iconFolderLocation = System.IO.Directory.GetCurrentDirectory() + "\\icon";
 
             /*Console.WriteLine("Deleting old shortcut");
@@ -311,8 +69,8 @@ namespace SteamShortcut
 
             Console.WriteLine("Attempting to get library data");
 
-            string recentGames = SteamJSON.APIRequestBuilder(key, "IPlayerService", "GetOwnedGames",
-                "v0001", new string[] { "steamid=" + SteamJSON.SearchJSON<string>(localData, "steamid"), "include_appinfo=true" });
+            string recentGames = APIRequestBuilder(key, "IPlayerService", "GetOwnedGames",
+                "v0001", new string[] { "steamid=" + localData.steamid, "include_appinfo=true" });
             string stringSite;
             Stream streamSite;
 
@@ -328,31 +86,32 @@ namespace SteamShortcut
 
             Console.WriteLine("Success, now parsing");
 
-            Dictionary<string, object> json = SteamJSON.ParseJSON(stringSite);
+            JsonNode json = JsonNode.Parse(stringSite)!;
 
             Console.WriteLine("Parse complete, seaching through "
-                          + SteamJSON.SearchJSON<long>(json, new string[] { "response", "game_count" }).ToString()
+                          + json!["response"]!["game_count"]!.ToString()
                           + " games to find most recently played game");
 
-            List<object> gamedata = SteamJSON.SearchJSON<List<object>>(json, new string[] { "response", "games" });
+            JsonArray gamedata = json!["response"]!["games"]!.AsArray();
 
-            Dictionary<string, object> highest = new Dictionary<string, object>();
+            JsonNode highest = gamedata![0]!;
             long highestValue = -1, currentValue;
-            string[] searchKeys = new string[] { "rtime_last_played" };
 
-            foreach (object game in gamedata)
+            for (int i = 0; i < gamedata.Count; i++)
             {
-                currentValue = SteamJSON.SearchJSON<long>((Dictionary<string, object>)game, searchKeys);
+                JsonNode game = gamedata![i]!;
+
+                currentValue = (long)game!["rtime_last_played"]!;
 
                 if (highestValue < currentValue)
                 {
-                    highest = (Dictionary<string, object>)game;
+                    highest = game;
                     highestValue = currentValue;
                 }
             }
 
-            long appid = SteamJSON.SearchJSON<long>(highest, "appid");
-            Console.WriteLine("Last played game: " + SteamJSON.SearchJSON<string>(highest, "name"));
+            long appid = (long)highest!["appid"]!;
+            Console.WriteLine("Last played game: " + highest!["name"]!);
             Console.WriteLine("Attempting to get game icon");
 
             // this was an attempt to get SteamCMD to hand over an app's icon hash. Couldn't get it to work, may revisit
@@ -373,7 +132,7 @@ namespace SteamShortcut
             Console.WriteLine("uhh?");*/
 
             string? iconPath = "";
-            if (SteamJSON.SearchJSONUnsure<string>(localData, new string[] { "clientIcons", appid.ToString() }, out iconPath))
+            if (localData.clientIcons.TryGetValue(((long)highest!["appid"]!).ToString(), out iconPath))
             {
                 Console.WriteLine("Icon url found");
             }
@@ -419,9 +178,9 @@ namespace SteamShortcut
 
             Console.WriteLine("Icon saved locally");
 
-            string oldLinkLocation = SteamJSON.SearchJSON<string>(localData, "lastGame");
-            string newLinkLocation = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) + "\\" + 
-                removeChars(SteamJSON.SearchJSON<string>(highest, "name"), badFilenameChars) + ".lnk";
+            string oldLinkLocation = localData.lastGame;
+            string newLinkLocation = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) +
+                "\\" + removeChars((string)highest!["name"]!, badFilenameChars) + ".lnk";
 
             if (System.IO.File.Exists(oldLinkLocation))
             {
@@ -459,8 +218,21 @@ namespace SteamShortcut
                 Console.WriteLine("Shortcut created! Cleaning up");
             }
 
-            changeLastGame(newLinkLocation);
+            localData.lastGame = newLinkLocation;
+            writeData(localData);
             Thread.Sleep(1000);
+        }
+
+        public static string APIRequestBuilder(string key, string service, string method, string version, string[] args)
+        {
+            string argsString = "";
+
+            foreach (string arg in args)
+            {
+                argsString += "&" + arg;
+            }
+
+            return "https://api.steampowered.com/" + service + "/" + method + "/" + version + "/?key=" + key + argsString + "&format=json";
         }
 
         private static string removeChars(string baseString, char[] chars)
@@ -502,30 +274,6 @@ namespace SteamShortcut
             clientIconsStartPoint = findString(data, "clientIcons\":{", true);
             newData = data.Substring(0, clientIconsStartPoint);
             newData += "\"" + appid + "\":" + "\""+ iconPath + "\"," + data.Substring(clientIconsStartPoint);
-
-            using (StreamWriter sw = new StreamWriter("data.txt"))
-            {
-                sw.Write(newData);
-            }
-        }
-
-        private static void changeLastGame(string newLastGame)
-        {
-            string data, oldLastGame, newData;
-            int restOfDataStartPoint, iconPathStartPoint;
-
-            using (StreamReader sr = System.IO.File.OpenText("data.txt"))
-            {
-                data = sr.ReadLine();
-            }
-
-            iconPathStartPoint = findString(data, "\"lastGame\":", true);
-
-            newData = data.Substring(0, iconPathStartPoint + 1);
-            oldLastGame = readString(data, iconPathStartPoint);
-            restOfDataStartPoint = iconPathStartPoint + 1 + oldLastGame.Length;
-
-            newData += newLastGame + data.Substring(restOfDataStartPoint);
 
             using (StreamWriter sw = new StreamWriter("data.txt"))
             {
@@ -588,13 +336,25 @@ namespace SteamShortcut
             return string.Empty;
         }
 
-        private static Dictionary<string, object> getData()
+        private static data getData()
         {
-            using (StreamReader sr = System.IO.File.OpenText("data.txt"))
+            data returnData = new data();
+
+            if (System.IO.File.Exists("data.txt"))
             {
-                Dictionary<string, object> data = SteamJSON.ParseJSON(sr.ReadLine());
-                return data;
+                using (StreamReader sr = System.IO.File.OpenText("data.txt"))
+                {
+                    returnData = JsonSerializer.Deserialize<data>(sr.ReadToEnd(), new JsonSerializerOptions { IncludeFields = true });
+                }
             }
+
+            writeData(returnData);
+            return returnData;
+        }
+
+        private static void writeData(data newData)
+        {
+            System.IO.File.WriteAllText("data.txt", JsonSerializer.Serialize(newData, new JsonSerializerOptions { IncludeFields = true }));
         }
 
         private static string getKey()
