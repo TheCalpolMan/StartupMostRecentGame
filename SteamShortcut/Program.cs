@@ -6,11 +6,15 @@ using System.Text.Json.Nodes;
 
 namespace SteamShortcut
 {
-    public struct data
+    public struct Data
     {
-        public string
-            steamid,
-            lastGame;
+        public string steamid;
+
+        public int linkAmount,
+            sleepBetweenRenames,
+            sleepBeforeIconChange;
+
+        public List<string> desktopShortcuts;
 
         public Dictionary<string, string> clientIcons;
     }
@@ -41,7 +45,7 @@ namespace SteamShortcut
 
         static void steamShortcut()
         {
-            data localData = getData();
+            Data localData = getData();
             string iconFolderLocation = System.IO.Directory.GetCurrentDirectory() + "\\icon";
 
             /*Console.WriteLine("Deleting old shortcut");
@@ -50,17 +54,13 @@ namespace SteamShortcut
             else
                 Console.WriteLine("Old shortcut didn't exist");*/
 
-            Console.WriteLine("Deleting old icon");
+            Console.WriteLine("Deleting old icon(s)");
             if (Directory.Exists(iconFolderLocation))
             {
                 foreach (string file in Directory.GetFiles(iconFolderLocation))
                 {
                     System.IO.File.Delete(file);
                 }
-            }
-            else
-            {
-                Console.WriteLine("Old icon didn't exist");
             }
 
             string key = getKey();
@@ -89,59 +89,106 @@ namespace SteamShortcut
             JsonNode json = JsonNode.Parse(stringSite)!;
 
             Console.WriteLine("Parse complete, seaching through "
-                          + json!["response"]!["game_count"]!.ToString()
-                          + " games to find most recently played game");
+                          + json!["response"]!["game_count"]!.ToString() + " games to find the "
+                          + localData.linkAmount.ToString() + " most recently played game(s)");
 
             JsonArray gamedata = json!["response"]!["games"]!.AsArray();
 
-            JsonNode highest = gamedata![0]!;
-            long highestValue = -1, currentValue;
+            List<JsonNode> highestNGames = new List<JsonNode>();
+            long currentGameTimePlayed;
 
             for (int i = 0; i < gamedata.Count; i++)
             {
                 JsonNode game = gamedata![i]!;
 
-                currentValue = (long)game!["rtime_last_played"]!;
-
-                if (highestValue < currentValue)
+                if (highestNGames.Count < localData.linkAmount)
                 {
-                    highest = game;
-                    highestValue = currentValue;
+                    highestNGames.Add(game);
+                    highestNGames.Sort(GameJSONNodeComparer);
+                    continue;
+                }
+
+                currentGameTimePlayed = (long)game!["rtime_last_played"]!;
+
+                if ((long) highestNGames[highestNGames.Count - 1]!["rtime_last_played"]! < currentGameTimePlayed)
+                {
+                    highestNGames.RemoveAt(highestNGames.Count - 1);
+                    highestNGames.Add(game);
+                    highestNGames.Sort(GameJSONNodeComparer);
                 }
             }
 
-            long appid = (long)highest!["appid"]!;
-            Console.WriteLine("Last played game: " + highest!["name"]!);
-            Console.WriteLine("Attempting to get game icon");
+            foreach (JsonNode game in highestNGames)
+            {
+                Console.WriteLine((string)game!["name"]!);
+            }
 
-            // this was an attempt to get SteamCMD to hand over an app's icon hash. Couldn't get it to work, may revisit
+            List<string> iconPaths = new List<string>(),
+                shortcutPaths = new List<string>();
+            string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) + "\\",
+                tempPath;
 
-            /*ProcessStartInfo processInfo;
-            Process process;
+            for (int i = 0; i < highestNGames.Count; i++)
+            {
+                Console.WriteLine("Attempting to get " + highestNGames[i]!["name"]! + "'s icon");
 
-            string appid = SteamJSON.SearchJSON<long>(highest, "appid").ToString();
-            processInfo = new ProcessStartInfo("cmd", "/C steamcmd +app_info_update " + appid + " +app_info_print " + appid + " +quit 1> _output.txt 2>&1");
-            processInfo.CreateNoWindow = false;
-            processInfo.UseShellExecute = false;
-            processInfo.RedirectStandardInput = true;
-            processInfo.RedirectStandardOutput = false;
-            processInfo.WorkingDirectory = "C:\\shit\\SteamCMD";
+                iconPaths.Add(saveGameIcon((long)highestNGames[i]!["appid"]!, iconFolderLocation, localData));
+            }
 
-            process = Process.Start(processInfo);
+            for (int i = 0; i < localData.desktopShortcuts.Count; i++)
+            {
+                tempPath = desktopPath + i.ToString() + ".lnk";
+                renameFile(localData.desktopShortcuts[0], tempPath);
+                localData.desktopShortcuts.RemoveAt(0);
+                localData.desktopShortcuts.Add(tempPath);
+            }
 
-            Console.WriteLine("uhh?");*/
+            Thread.Sleep(localData.sleepBetweenRenames);
 
+            for (int i = 0; i < highestNGames.Count; i++)
+            {
+                tempPath = desktopPath + removeChars((string)highestNGames[i]!["name"]!, badFilenameChars) + ".lnk";
+
+                if(i < localData.desktopShortcuts.Count)
+                {
+                    renameFile(localData.desktopShortcuts[0], tempPath);
+                    localData.desktopShortcuts.RemoveAt(0);
+                }
+                else
+                {
+                    modifyOrCreateShortcut(tempPath, iconPaths[i], "https://google.com");
+                }
+
+                localData.desktopShortcuts.Add(tempPath);
+            }
+
+            Thread.Sleep(localData.sleepBeforeIconChange);
+
+            for (int i = 0; i < highestNGames.Count; i++)
+            {
+                tempPath = desktopPath + removeChars((string)highestNGames[i]!["name"]!, badFilenameChars) + ".lnk";
+                modifyOrCreateShortcut(tempPath, iconPaths[i], "steam://rungameid/" 
+                    + ((long)highestNGames[i]!["appid"]!).ToString());
+            }
+
+            writeData(localData);
+            Thread.Sleep(1000);
+        }
+
+        public static string saveGameIcon(long appid, string iconFolderLocation, Data localData)
+        {
+            Stream streamSite;
             string? iconPath = "";
-            if (localData.clientIcons.TryGetValue(((long)highest!["appid"]!).ToString(), out iconPath))
+            if (localData.clientIcons.TryGetValue((appid).ToString(), out iconPath))
             {
                 Console.WriteLine("Icon url found");
             }
             else
             {
                 Console.WriteLine("Icon path not found, please find icon url on steamDB then enter below");
-                Console.WriteLine("https://steamdb.info/app/" + appid +"/info/");
+                Console.WriteLine("https://steamdb.info/app/" + appid + "/info/");
                 iconPath = Console.ReadLine();
-                addAppIconToData(appid.ToString(), iconPath);
+                localData.clientIcons.Add(appid.ToString(), iconPath);
                 Console.WriteLine("Url added to local data");
             }
 
@@ -152,7 +199,7 @@ namespace SteamShortcut
             catch (TimeoutException ex)
             {
                 Console.WriteLine(ex.Message);
-                return;
+                return "";
             }
 
             Console.WriteLine("Getting icon from url");
@@ -170,57 +217,59 @@ namespace SteamShortcut
                 icon = new Icon(ms);
             }
 
-            Directory.CreateDirectory(iconFolderLocation);
-
             string iconLocation = iconFolderLocation + "\\" + appid.ToString() + ".ico";
             using (FileStream fs = new FileStream(iconLocation, FileMode.Create))
                 icon.Save(fs);
 
             Console.WriteLine("Icon saved locally");
 
-            string oldLinkLocation = localData.lastGame;
-            string newLinkLocation = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) +
-                "\\" + removeChars((string)highest!["name"]!, badFilenameChars) + ".lnk";
+            return iconLocation;
+        }
 
-            if (System.IO.File.Exists(oldLinkLocation))
+        public static void renameFile(string oldPath, string newPath)
+        {
+            if (System.IO.File.Exists(oldPath))
             {
-                Console.WriteLine("Editing shortcut");
-
-                if(oldLinkLocation != newLinkLocation)
+                if (oldPath != newPath)
                 {
                     // changing the name
-                    System.IO.File.Move(oldLinkLocation, newLinkLocation);
-                    Thread.Sleep(1000);
-
-                    // changing the icon and target address
-
-                    WshShell shell = new WshShell();
-                    IWshShortcut link = (IWshShortcut)shell.CreateShortcut(newLinkLocation);
-                    link.TargetPath = "steam://rungameid/" + appid.ToString();
-                    link.IconLocation = iconLocation;
-                    link.Save();
+                    System.IO.File.Move(oldPath, newPath);
                 }
-
-                Console.WriteLine("Shortcut edited! Cleaning up");
             }
+        }
+
+        public static void modifyOrCreateShortcut(string path, string iconPath, string destination)
+        {
+            if (System.IO.File.Exists(path))
+                Console.WriteLine("Editing shortcut");
             else
-            {
                 Console.WriteLine("No existing shortcut, creating shortcut");
 
-                // using code from https://www.codeproject.com/Articles/3905/Creating-Shell-Links-Shortcuts-in-NET-Programs-Usi
+            // using code from https://www.codeproject.com/Articles/3905/Creating-Shell-Links-Shortcuts-in-NET-Programs-Usi
+            // changing the icon and target address
 
-                WshShell shell = new WshShell();
-                IWshShortcut link = (IWshShortcut)shell.CreateShortcut(newLinkLocation);
-                link.TargetPath = "steam://rungameid/" + appid.ToString();
-                link.IconLocation = iconLocation;
-                link.Save();
+            WshShell shell = new WshShell();
+            IWshShortcut link = (IWshShortcut)shell.CreateShortcut(path);
+            link.TargetPath = destination;
+            link.IconLocation = iconPath;
+            link.Save();
+        }
 
-                Console.WriteLine("Shortcut created! Cleaning up");
+        public static int GameJSONNodeComparer(JsonNode x, JsonNode y)
+        {
+            long xPlayed = (long)x!["rtime_last_played"]!,
+                yPlayed = (long)y!["rtime_last_played"]!;
+
+            if (xPlayed < yPlayed)
+            {
+                return 1;
+            }
+            else if (xPlayed == yPlayed)
+            {
+                return 0;
             }
 
-            localData.lastGame = newLinkLocation;
-            writeData(localData);
-            Thread.Sleep(1000);
+            return -1;
         }
 
         public static string APIRequestBuilder(string key, string service, string method, string version, string[] args)
@@ -259,26 +308,6 @@ namespace SteamShortcut
             }
 
             return false;
-        }
-
-        private static void addAppIconToData(string appid, string iconPath)
-        {
-            string data, oldLastGame, newData;
-            int clientIconsStartPoint;
-
-            using (StreamReader sr = System.IO.File.OpenText("data.txt"))
-            {
-                data = sr.ReadLine();
-            }
-
-            clientIconsStartPoint = findString(data, "clientIcons\":{", true);
-            newData = data.Substring(0, clientIconsStartPoint);
-            newData += "\"" + appid + "\":" + "\""+ iconPath + "\"," + data.Substring(clientIconsStartPoint);
-
-            using (StreamWriter sw = new StreamWriter("data.txt"))
-            {
-                sw.Write(newData);
-            }
         }
 
         /// <summary>
@@ -336,15 +365,15 @@ namespace SteamShortcut
             return string.Empty;
         }
 
-        private static data getData()
+        private static Data getData()
         {
-            data returnData = new data();
+            Data returnData = new Data();
 
             if (System.IO.File.Exists("data.txt"))
             {
                 using (StreamReader sr = System.IO.File.OpenText("data.txt"))
                 {
-                    returnData = JsonSerializer.Deserialize<data>(sr.ReadToEnd(), new JsonSerializerOptions { IncludeFields = true });
+                    returnData = JsonSerializer.Deserialize<Data>(sr.ReadToEnd(), new JsonSerializerOptions { IncludeFields = true });
                 }
             }
 
@@ -352,7 +381,7 @@ namespace SteamShortcut
             return returnData;
         }
 
-        private static void writeData(data newData)
+        private static void writeData(Data newData)
         {
             System.IO.File.WriteAllText("data.txt", JsonSerializer.Serialize(newData, new JsonSerializerOptions { IncludeFields = true }));
         }
